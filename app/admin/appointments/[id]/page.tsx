@@ -11,7 +11,6 @@ import {
   User,
   IndianRupee,
   FileText,
-  File,
   Paperclip,
 } from "lucide-react";
 
@@ -20,6 +19,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import Image from "next/image";
+import toast from "react-hot-toast";
 
 /* ---------------------------- TYPES ---------------------------- */
 
@@ -42,8 +42,12 @@ type AppointmentResponse = {
 
     payment?: {
       amount: number;
-      razorpayPaymentId: string;
+      razorpayPaymentId?: string;
       status: "PAID" | "FAILED" | "PENDING";
+
+      // ✅ NEW FIELDS
+      method?: "ONLINE" | "PAY_ON_ARRIVAL";
+      paidAt?: string;
     };
 
     meet?: {
@@ -91,13 +95,20 @@ export default function AdminAppointmentDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
-  const { data, isLoading } = useQuery({
+  const [markingPaid, setMarkingPaid] = useState(false);
+
+  const {
+    data,
+    isLoading,
+    refetch: refetchAppointment, // ✅ NEW
+  } = useQuery({
     queryKey: ["admin-appointment", id],
     queryFn: async () => {
       const res = await api.get(`/appointments/${id}`);
       return res.data as AppointmentResponse;
     },
   });
+
   const {
     data: notesData,
     refetch: refetchNotes,
@@ -116,10 +127,29 @@ export default function AdminAppointmentDetailsPage() {
   }) => {
     await api.post(`/appointments/${id}/notes`, payload);
   };
+
   const deleteNote = async (noteId: string) => {
     if (!confirm("Delete this note?")) return;
     await api.delete(`/appointments/${id}/notes/${noteId}`);
     refetchNotes();
+  };
+
+  // ✅ NEW: mark payment paid
+  const markPaymentAsPaid = async () => {
+    if (!confirm("Mark this appointment as PAID?")) return;
+
+    try {
+      setMarkingPaid(true);
+      await api.post(`/appointments/${id}/mark-paid`);
+
+      toast.success("Payment marked as PAID");
+      await refetchAppointment();
+    } catch (err: any) {
+      console.error("markPaymentAsPaid error:", err);
+      toast.error(err?.response?.data?.error || "Failed to mark payment as paid");
+    } finally {
+      setMarkingPaid(false);
+    }
   };
 
   if (isLoading) {
@@ -158,6 +188,12 @@ export default function AdminAppointmentDetailsPage() {
   };
 
   const awsBase = process.env.NEXT_PUBLIC_AWS_URL;
+
+  const paymentStatus = appointment.payment?.status || "PENDING";
+  const paymentMethod = appointment.payment?.method || "ONLINE";
+
+  const showMarkPaidButton =
+    paymentStatus === "PENDING" && paymentMethod === "PAY_ON_ARRIVAL";
 
   /* ============================ UI ============================ */
 
@@ -203,7 +239,10 @@ export default function AdminAppointmentDetailsPage() {
                 <User className="h-7 w-7 text-blue-600" />
               </div>
 
-              <div onClick={()=>router.push('/admin/patients/'+patient._id)} className="flex-1 cursor-pointer">
+              <div
+                onClick={() => router.push("/admin/patients/" + patient._id)}
+                className="flex-1 cursor-pointer"
+              >
                 <p className="text-xs uppercase tracking-wide text-gray-500">
                   Patient
                 </p>
@@ -261,11 +300,24 @@ export default function AdminAppointmentDetailsPage() {
             <p className="text-xs uppercase tracking-wide text-gray-500 mb-3">
               Payment
             </p>
-            <p className="text-xs">
-              Razorpay ID: {appointment.payment?.razorpayPaymentId}
+
+            <p className="text-xs text-gray-600">
+              Method:{" "}
+              <span className="font-semibold text-gray-800">
+                {paymentMethod === "PAY_ON_ARRIVAL"
+                  ? "Pay on Arrival"
+                  : "Online"}
+              </span>
             </p>
 
-            <div className="flex items-center gap-4">
+            <p className="text-xs text-gray-600 mt-1">
+              Razorpay ID:{" "}
+              <span className="font-mono">
+                {appointment.payment?.razorpayPaymentId || "—"}
+              </span>
+            </p>
+
+            <div className="flex items-center gap-4 mt-3">
               <IndianRupee className="h-6 w-6 text-gray-400" />
               <span className="text-2xl font-semibold text-gray-900">
                 ₹{(appointment.payment?.amount || 0) / 100}
@@ -273,14 +325,33 @@ export default function AdminAppointmentDetailsPage() {
 
               <span
                 className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                  appointment.payment?.status === "PAID"
+                  paymentStatus === "PAID"
                     ? "bg-green-100 text-green-700"
+                    : paymentStatus === "FAILED"
+                    ? "bg-red-100 text-red-700"
                     : "bg-yellow-100 text-yellow-700"
                 }`}
               >
-                {appointment.payment?.status}
+                {paymentStatus}
               </span>
             </div>
+
+            {/* ✅ NEW BUTTON: Mark as Paid */}
+            {showMarkPaidButton && (
+              <div className="mt-5">
+                <Button
+                  onClick={markPaymentAsPaid}
+                  disabled={markingPaid}
+                  className="cursor-pointer"
+                >
+                  {markingPaid ? "Marking…" : "Mark Payment as PAID"}
+                </Button>
+
+                <p className="text-xs text-gray-500 mt-2">
+                  Use this after receiving cash/UPI at the clinic.
+                </p>
+              </div>
+            )}
           </Card>
 
           {/* ---------- DOCUMENTS ---------- */}
@@ -340,6 +411,7 @@ export default function AdminAppointmentDetailsPage() {
                     <p className="text-sm text-gray-800 whitespace-pre-wrap">
                       {note.text}
                     </p>
+
                     <div className="flex flex-row gap-1 mt-2">
                       {note?.documents?.map((doc) => {
                         return (
@@ -349,12 +421,14 @@ export default function AdminAppointmentDetailsPage() {
                             href={`${process.env.NEXT_PUBLIC_AWS_URL}/${doc.s3Key}`}
                           >
                             <div className="w-fit flex flex-row items-center gap-1 text-sm rounded-md bg-gray-100 border border-gray-300 px-4 py-2 cursor-pointer">
-                              <Paperclip className="font-light w-3 h-3"/> {doc.filename}
+                              <Paperclip className="font-light w-3 h-3" />{" "}
+                              {doc.filename}
                             </div>
                           </a>
                         );
                       })}
                     </div>
+
                     <div className="mt-4 flex items-center justify-between">
                       <span className="text-xs text-gray-400">
                         {new Date(note.createdAt).toLocaleString("en-IN")}
