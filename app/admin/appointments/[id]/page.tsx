@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import Image from "next/image";
 import toast from "react-hot-toast";
+import { Input } from "@/components/ui/input";
 
 /* ---------------------------- TYPES ---------------------------- */
 
@@ -45,7 +46,6 @@ type AppointmentResponse = {
       razorpayPaymentId?: string;
       status: "PAID" | "FAILED" | "PENDING";
 
-      // ✅ NEW FIELDS
       method?: "ONLINE" | "PAY_ON_ARRIVAL";
       paidAt?: string;
     };
@@ -100,7 +100,7 @@ export default function AdminAppointmentDetailsPage() {
   const {
     data,
     isLoading,
-    refetch: refetchAppointment, // ✅ NEW
+    refetch: refetchAppointment,
   } = useQuery({
     queryKey: ["admin-appointment", id],
     queryFn: async () => {
@@ -134,7 +134,6 @@ export default function AdminAppointmentDetailsPage() {
     refetchNotes();
   };
 
-  // ✅ NEW: mark payment paid
   const markPaymentAsPaid = async () => {
     if (!confirm("Mark this appointment as PAID?")) return;
 
@@ -146,34 +145,70 @@ export default function AdminAppointmentDetailsPage() {
       await refetchAppointment();
     } catch (err: any) {
       console.error("markPaymentAsPaid error:", err);
-      toast.error(err?.response?.data?.error || "Failed to mark payment as paid");
+      toast.error(
+        err?.response?.data?.error || "Failed to mark payment as paid",
+      );
     } finally {
       setMarkingPaid(false);
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="h-screen flex items-center justify-center text-gray-500">
-        Loading appointment…
-      </div>
-    );
+  
+
+  const appointment = data?.appointment;
+  const patient = appointment?.patientId;
+  const isOnline = appointment?.city === "ONLINE";
+  const meetLink = appointment?.meet?.link;
+
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+
+  const [newDate, setNewDate] = useState("");
+  const [newClinic, setNewClinic] = useState(appointment?.city);
+  const [newSlot, setNewSlot] = useState<string | null>(null);
+
+  const { data: slotData, isLoading: slotsLoading } = useQuery({
+    queryKey: ["admin-slots", newDate, newClinic],
+    queryFn: async () => {
+      if (!newDate) return { slots: [] };
+
+      const res = await api.get(`/slots?date=${newDate}&clinic=${newClinic}`);
+      return res.data;
+    },
+    enabled: !!newDate,
+  });
+
+  function getEndTime(start: string) {
+    const [hh, mm] = start.split(":").map(Number);
+
+    const d = new Date();
+    d.setHours(hh);
+    d.setMinutes(mm + 30);
+
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
 
-  if (!data?.appointment) {
-    return (
-      <div className="h-screen flex items-center justify-center">
-        Appointment not found
-      </div>
-    );
-  }
+  const rescheduleMutation = async () => {
+    if (!newDate || !newSlot) {
+      toast.error("Select date and slot");
+      return;
+    }
 
-  const { appointment } = data;
-  const patient = appointment.patientId;
-  const isOnline = appointment.city === "ONLINE";
-  const meetLink = appointment.meet?.link;
+    const endTime = getEndTime(newSlot);
 
-  const formattedDate = new Date(appointment.date).toLocaleDateString("en-IN", {
+    await api.patch(`/appointments/${appointment?._id}`, {
+      date: newDate,
+      startTime: newSlot,
+      endTime,
+    });
+
+    toast.success("Appointment rescheduled");
+
+    setShowRescheduleModal(false);
+
+    await refetchAppointment();
+  };
+
+  const formattedDate = new Date(appointment?.date as string).toLocaleDateString("en-IN", {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -189,12 +224,28 @@ export default function AdminAppointmentDetailsPage() {
 
   const awsBase = process.env.NEXT_PUBLIC_AWS_URL;
 
-  const paymentStatus = appointment.payment?.status || "PENDING";
-  const paymentMethod = appointment.payment?.method || "ONLINE";
+  const paymentStatus = appointment?.payment?.status || "PENDING";
+  const paymentMethod = appointment?.payment?.method || "ONLINE";
 
   const showMarkPaidButton =
     paymentStatus === "PENDING" && paymentMethod === "PAY_ON_ARRIVAL";
 
+  
+if (isLoading) {
+  return (
+    <div className="h-screen flex items-center justify-center text-gray-500">
+      Loading appointment…
+    </div>
+  );
+}
+
+if (!appointment) {
+  return (
+    <div className="h-screen flex items-center justify-center">
+      Appointment not found
+    </div>
+  );
+}
   /* ============================ UI ============================ */
 
   return (
@@ -209,6 +260,13 @@ export default function AdminAppointmentDetailsPage() {
             Appointment ID:{" "}
             <span className="font-mono text-gray-700">{appointment._id}</span>
           </p>
+          <Button
+            variant="outline"
+            onClick={() => setShowRescheduleModal(true)}
+            className="mt-4 cursor-pointer"
+          >
+            Reschedule Appointment
+          </Button>
         </div>
 
         <div className="flex gap-3">
@@ -240,26 +298,26 @@ export default function AdminAppointmentDetailsPage() {
               </div>
 
               <div
-                onClick={() => router.push("/admin/patients/" + patient._id)}
+                onClick={() => router.push("/admin/patients/" + patient?._id)}
                 className="flex-1 cursor-pointer"
               >
                 <p className="text-xs uppercase tracking-wide text-gray-500">
                   Patient
                 </p>
                 <p className="text-lg font-semibold text-gray-900">
-                  {patient.name}
+                  {patient?.name}
                 </p>
                 <p className="text-sm text-gray-600">
-                  {patient.gender === "M" ? "Male" : "Female"}
+                  {patient?.gender === "M" ? "Male" : "Female"}
                 </p>
               </div>
 
               <a
-                href={`tel:${patient.phone}`}
+                href={`tel:${patient?.phone}`}
                 className="cursor-pointer inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
               >
                 <Phone className="h-4 w-4" />
-                {patient.phone}
+                {patient?.phone}
               </a>
             </div>
           </Card>
@@ -328,15 +386,14 @@ export default function AdminAppointmentDetailsPage() {
                   paymentStatus === "PAID"
                     ? "bg-green-100 text-green-700"
                     : paymentStatus === "FAILED"
-                    ? "bg-red-100 text-red-700"
-                    : "bg-yellow-100 text-yellow-700"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-yellow-100 text-yellow-700"
                 }`}
               >
                 {paymentStatus}
               </span>
             </div>
 
-            {/* ✅ NEW BUTTON: Mark as Paid */}
             {showMarkPaidButton && (
               <div className="mt-5">
                 <Button
@@ -488,6 +545,86 @@ export default function AdminAppointmentDetailsPage() {
           </Card>
         </aside>
       </div>
+      {showRescheduleModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-lg p-6 space-y-6">
+            <h2 className="text-lg font-semibold">Reschedule Appointment</h2>
+
+            {/* DATE */}
+            <div>
+              <label className="text-sm font-medium">New Date</label>
+              <Input
+                type="date"
+                value={newDate}
+                onChange={(e) => {
+                  setNewDate(e.target.value);
+                  setNewSlot(null);
+                }}
+              />
+            </div>
+
+            {/* CLINIC */}
+            <div>
+              <label className="text-sm font-medium">Clinic</label>
+
+              <select
+                value={newClinic}
+                onChange={(e) => {
+                  setNewClinic(e.target.value as any);
+                  setNewSlot(null);
+                }}
+                className="w-full border rounded-lg p-2 mt-1"
+              >
+                <option value="DEHRADUN">Dehradun</option>
+                <option value="ROORKEE">Roorkee</option>
+                <option value="ONLINE">Online</option>
+              </select>
+            </div>
+
+            {/* SLOTS */}
+            <div>
+              <label className="text-sm font-medium">Available Slots</label>
+
+              {slotsLoading ? (
+                <p className="text-sm text-gray-500 mt-2">Loading slots...</p>
+              ) : (
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  {slotData?.slots?.map((slot: any) => (
+                    <button
+                      key={slot.startTime}
+                      disabled={!slot.available}
+                      onClick={() => setNewSlot(slot.startTime)}
+                      className={`
+                  p-2 rounded border text-sm
+                  ${
+                    newSlot === slot.startTime
+                      ? "bg-blue-100 border-blue-400"
+                      : "border-gray-300"
+                  }
+                  ${!slot.available && "opacity-40 cursor-not-allowed"}
+                `}
+                    >
+                      {slot.startTime}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ACTIONS */}
+            <div className="flex justify-end gap-3 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setShowRescheduleModal(false)}
+              >
+                Cancel
+              </Button>
+
+              <Button onClick={rescheduleMutation}>Confirm Reschedule</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -495,7 +632,7 @@ export default function AdminAppointmentDetailsPage() {
 async function uploadWithPresign(
   file: File,
   appointmentId: string,
-  onProgress?: (p: number) => void
+  onProgress?: (p: number) => void,
 ): Promise<UploadedDoc> {
   // 1. Get presigned URL
   const presignRes = await api.post("/uploads/presign", {
@@ -566,7 +703,7 @@ function AddNoteForm({
         setUploading((u) => ({ ...u, [tempId]: 0 }));
 
         const doc = await uploadWithPresign(file, appointmentId, (p) =>
-          setUploading((u) => ({ ...u, [tempId]: p }))
+          setUploading((u) => ({ ...u, [tempId]: p })),
         );
 
         setNoteDocs((d) => [doc, ...d]);
