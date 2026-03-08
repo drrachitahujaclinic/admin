@@ -70,6 +70,17 @@ type AppointmentResponse = {
   };
 };
 
+type Prescription = {
+  _id: string;
+  version: number;
+  createdAt: string;
+  pdfDocumentId: {
+    _id: string;
+    filename: string;
+    s3Key: string;
+  };
+};
+
 type Note = {
   _id: string;
   text?: string;
@@ -153,8 +164,6 @@ export default function AdminAppointmentDetailsPage() {
     }
   };
 
-  
-
   const appointment = data?.appointment;
   const patient = appointment?.patientId;
   const isOnline = appointment?.city === "ONLINE";
@@ -208,7 +217,9 @@ export default function AdminAppointmentDetailsPage() {
     await refetchAppointment();
   };
 
-  const formattedDate = new Date(appointment?.date as string).toLocaleDateString("en-IN", {
+  const formattedDate = new Date(
+    appointment?.date as string,
+  ).toLocaleDateString("en-IN", {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -230,22 +241,36 @@ export default function AdminAppointmentDetailsPage() {
   const showMarkPaidButton =
     paymentStatus === "PENDING" && paymentMethod === "PAY_ON_ARRIVAL";
 
-  
-if (isLoading) {
-  return (
-    <div className="h-screen flex items-center justify-center text-gray-500">
-      Loading appointment…
-    </div>
-  );
-}
+  const [showPrescriptionModal, setShowPrescriptionModal] =
+    useState<boolean>(false);
 
-if (!appointment) {
-  return (
-    <div className="h-screen flex items-center justify-center">
-      Appointment not found
-    </div>
-  );
-}
+  const {
+    data: prescriptionData,
+    refetch: refetchPrescriptions,
+    isLoading: prescriptionsLoading,
+  } = useQuery({
+    queryKey: ["appointment-prescriptions", id],
+    queryFn: async () => {
+      const res = await api.get(`/appointments/${id}/prescriptions`);
+      return res.data.prescriptions as Prescription[];
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center text-gray-500">
+        Loading appointment…
+      </div>
+    );
+  }
+
+  if (!appointment) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        Appointment not found
+      </div>
+    );
+  }
   /* ============================ UI ============================ */
 
   return (
@@ -266,6 +291,12 @@ if (!appointment) {
             className="mt-4 cursor-pointer"
           >
             Reschedule Appointment
+          </Button>
+          <Button
+            onClick={() => setShowPrescriptionModal(true)}
+            className="cursor-pointer ml-4"
+          >
+            Create Prescription
           </Button>
         </div>
 
@@ -434,6 +465,43 @@ if (!appointment) {
                       {doc.filename}
                     </p>
                     <p className="text-xs text-gray-500">{doc.mimeType}</p>
+                  </a>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          {/* ---------- PRESCRIPTIONS ---------- */}
+          <Card className="p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Prescriptions
+            </h3>
+
+            {prescriptionsLoading ? (
+              <p className="text-sm text-gray-500">Loading prescriptions...</p>
+            ) : prescriptionData?.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                No prescriptions generated yet
+              </p>
+            ) : (
+              <div className="flex gap-4 overflow-x-auto pb-2">
+                {prescriptionData?.map((pres) => (
+                  <a
+                    key={pres._id}
+                    href={`${awsBase}/${pres.pdfDocumentId.s3Key}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-w-55 rounded-xl border bg-gray-50 p-4 hover:bg-gray-100 transition"
+                  >
+                    <FileText className="h-5 w-5 text-gray-500 mb-2" />
+
+                    <p className="text-sm font-medium">
+                      Prescription v{pres.version}
+                    </p>
+
+                    <p className="text-xs text-gray-500">
+                      {new Date(pres.createdAt).toLocaleString("en-IN")}
+                    </p>
                   </a>
                 ))}
               </div>
@@ -624,6 +692,16 @@ if (!appointment) {
             </div>
           </div>
         </div>
+      )}
+      {showPrescriptionModal && (
+        <PrescriptionModal
+          appointmentId={appointment._id}
+          onClose={() => setShowPrescriptionModal(false)}
+          onSuccess={() => {
+            refetchPrescriptions();
+            setShowPrescriptionModal(false);
+          }}
+        />
       )}
     </div>
   );
@@ -847,6 +925,395 @@ function AddNoteForm({
         >
           Add Note
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function PrescriptionModal({
+  appointmentId,
+  onClose,
+  onSuccess,
+}: {
+  appointmentId: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  /* ================= STATES ================= */
+
+  const [vitals, setVitals] = useState({
+    bp: "",
+    temperature: "",
+    spo2: "",
+    pulse: "",
+    rbs: "",
+    height: "",
+    weight: "",
+    bmi: "",
+  });
+
+  const [history, setHistory] = useState({
+    allergies: "",
+    personalHistory: "",
+    pastMedicalHistory: "",
+    familyHistory: "",
+  });
+
+  const [complaints, setComplaints] = useState("");
+  const [diagnosis, setDiagnosis] = useState("");
+
+  const [medicines, setMedicines] = useState([
+    {
+      name: "",
+      dosage: "",
+      timing: "",
+      frequency: "Daily",
+      duration: "",
+    },
+  ]);
+
+  const [advice, setAdvice] = useState("");
+  const [tests, setTests] = useState("");
+  const [nextVisit, setNextVisit] = useState("");
+
+  const [loading, setLoading] = useState(false);
+
+  /* ================= MEDICINE ================= */
+
+  const addMedicine = () => {
+    setMedicines([
+      ...medicines,
+      {
+        name: "",
+        dosage: "",
+        timing: "",
+        frequency: "Daily",
+        duration: "",
+      },
+    ]);
+  };
+
+  const removeMedicine = (i: number) => {
+    setMedicines(medicines.filter((_, index) => index !== i));
+  };
+
+  const updateMedicine = (i: number, field: string, value: string) => {
+    const copy = [...medicines];
+    // @ts-ignore
+    copy[i][field] = value;
+    setMedicines(copy);
+  };
+
+  /* ================= SUBMIT ================= */
+
+  const submit = async () => {
+    try {
+      setLoading(true);
+
+      await api.post(`/appointments/${appointmentId}/prescriptions`, {
+        vitals,
+        history,
+        complaints,
+        diagnosis,
+
+        medicines: medicines
+          .filter((m) => m.name.trim() !== "")
+          .map((m) => ({
+            name: m.name,
+            dosage: m.dosage,
+            timing: m.timing,
+            frequency: m.frequency,
+            duration: m.duration,
+          })),
+
+        advice,
+        tests,
+        nextVisit,
+      });
+
+      toast.success("Prescription generated");
+
+      onSuccess();
+    } catch (err: any) {
+      toast.error(
+        err?.response?.data?.error || "Failed to create prescription",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* ================= UI ================= */
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-6">
+        <h2 className="text-lg font-semibold">Create Prescription</h2>
+
+        {/* ================= VITALS ================= */}
+
+        <div>
+          <p className="font-medium mb-2">Vitals</p>
+
+          <div className="grid grid-cols-4 gap-2">
+            <Input
+              placeholder="BP"
+              value={vitals.bp}
+              onChange={(e) => setVitals({ ...vitals, bp: e.target.value })}
+            />
+
+            <Input
+              placeholder="Temp"
+              value={vitals.temperature}
+              onChange={(e) =>
+                setVitals({ ...vitals, temperature: e.target.value })
+              }
+            />
+
+            <Input
+              placeholder="SpO2"
+              value={vitals.spo2}
+              onChange={(e) => setVitals({ ...vitals, spo2: e.target.value })}
+            />
+
+            <Input
+              placeholder="Pulse"
+              value={vitals.pulse}
+              onChange={(e) => setVitals({ ...vitals, pulse: e.target.value })}
+            />
+
+            <Input
+              placeholder="RBS"
+              value={vitals.rbs}
+              onChange={(e) => setVitals({ ...vitals, rbs: e.target.value })}
+            />
+
+            <Input
+              placeholder="Height"
+              value={vitals.height}
+              onChange={(e) => setVitals({ ...vitals, height: e.target.value })}
+            />
+
+            <Input
+              placeholder="Weight"
+              value={vitals.weight}
+              onChange={(e) => setVitals({ ...vitals, weight: e.target.value })}
+            />
+
+            <Input
+              placeholder="BMI"
+              value={vitals.bmi}
+              onChange={(e) => setVitals({ ...vitals, bmi: e.target.value })}
+            />
+          </div>
+        </div>
+
+        {/* ================= HISTORY ================= */}
+
+        <div>
+          <p className="font-medium mb-2">History</p>
+
+          <textarea
+            placeholder="Allergies"
+            className="w-full border rounded-lg p-2 mb-2"
+            value={history.allergies}
+            onChange={(e) =>
+              setHistory({ ...history, allergies: e.target.value })
+            }
+          />
+
+          <textarea
+            placeholder="Personal History"
+            className="w-full border rounded-lg p-2 mb-2"
+            value={history.personalHistory}
+            onChange={(e) =>
+              setHistory({ ...history, personalHistory: e.target.value })
+            }
+          />
+
+          <textarea
+            placeholder="Past Medical History"
+            className="w-full border rounded-lg p-2 mb-2"
+            value={history.pastMedicalHistory}
+            onChange={(e) =>
+              setHistory({ ...history, pastMedicalHistory: e.target.value })
+            }
+          />
+
+          <textarea
+            placeholder="Family History"
+            className="w-full border rounded-lg p-2"
+            value={history.familyHistory}
+            onChange={(e) =>
+              setHistory({ ...history, familyHistory: e.target.value })
+            }
+          />
+        </div>
+
+        {/* ================= COMPLAINTS ================= */}
+
+        <div>
+          <p className="font-medium mb-2">Complaints</p>
+
+          <textarea
+            className="w-full border rounded-lg p-2"
+            value={complaints}
+            onChange={(e) => setComplaints(e.target.value)}
+          />
+        </div>
+
+        {/* ================= DIAGNOSIS ================= */}
+
+        <div>
+          <p className="font-medium mb-2">Diagnosis</p>
+
+          <textarea
+            className="w-full border rounded-lg p-2"
+            value={diagnosis}
+            onChange={(e) => setDiagnosis(e.target.value)}
+          />
+        </div>
+
+        {/* ================= MEDICINES ================= */}
+
+<div>
+  <div className="flex items-center justify-between mb-3">
+    <p className="font-medium">Medicines</p>
+
+    <Button variant="outline" onClick={addMedicine}>
+      Add Medicine
+    </Button>
+  </div>
+
+  <div className="space-y-4">
+
+    {medicines.map((m, i) => (
+      <div
+        key={i}
+        className="border rounded-xl p-4 space-y-3 bg-gray-50"
+      >
+
+        {/* Medicine name full width */}
+
+        <Input
+          placeholder="Medicine name"
+          value={m.name}
+          onChange={(e) =>
+            updateMedicine(i, "name", e.target.value)
+          }
+        />
+
+        {/* dosage / timing / frequency / duration */}
+
+        <div className="grid grid-cols-4 gap-2">
+
+          <Input
+            placeholder="Dosage (1-0-1)"
+            value={m.dosage}
+            onChange={(e) =>
+              updateMedicine(i, "dosage", e.target.value)
+            }
+          />
+
+          <select
+            value={m.timing}
+            onChange={(e) =>
+              updateMedicine(i, "timing", e.target.value)
+            }
+            className="border rounded-lg p-2"
+          >
+            <option value="">Timing</option>
+            <option value="After Food">After Food</option>
+            <option value="Before Food">Before Food</option>
+            <option value="Empty Stomach">Empty Stomach</option>
+          </select>
+
+          <select
+            value={m.frequency}
+            onChange={(e) =>
+              updateMedicine(i, "frequency", e.target.value)
+            }
+            className="border rounded-lg p-2"
+          >
+            <option value="Daily">Daily</option>
+            <option value="SOS">SOS</option>
+            <option value="Alternate Day">Alternate Day</option>
+          </select>
+
+          <Input
+            placeholder="Duration (5 days)"
+            value={m.duration}
+            onChange={(e) =>
+              updateMedicine(i, "duration", e.target.value)
+            }
+          />
+
+        </div>
+
+        {/* remove button */}
+
+        <div className="flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => removeMedicine(i)}
+          >
+            Remove
+          </Button>
+        </div>
+
+      </div>
+    ))}
+
+  </div>
+</div>
+        {/* ================= ADVICE ================= */}
+
+        <div>
+          <p className="font-medium mb-2">Advice</p>
+
+          <textarea
+            className="w-full border rounded-lg p-2"
+            value={advice}
+            onChange={(e) => setAdvice(e.target.value)}
+          />
+        </div>
+
+        {/* ================= TESTS ================= */}
+
+        <div>
+          <p className="font-medium mb-2">Tests</p>
+
+          <textarea
+            className="w-full border rounded-lg p-2"
+            value={tests}
+            onChange={(e) => setTests(e.target.value)}
+          />
+        </div>
+
+        {/* ================= NEXT VISIT ================= */}
+
+        <div>
+          <p className="font-medium mb-2">Next Visit</p>
+
+          <Input
+            placeholder="e.g 2 weeks"
+            value={nextVisit}
+            onChange={(e) => setNextVisit(e.target.value)}
+          />
+        </div>
+
+        {/* ================= ACTIONS ================= */}
+
+        <div className="flex justify-end gap-3 pt-4">
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+
+          <Button onClick={submit} disabled={loading}>
+            {loading ? "Generating..." : "Generate Prescription"}
+          </Button>
+        </div>
       </div>
     </div>
   );
