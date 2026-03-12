@@ -399,18 +399,15 @@ export default function AdminAppointmentDetailsPage() {
               </span>
             </p>
 
-            <p className="text-xs text-gray-600 mt-1">
-              Razorpay ID:{" "}
-              <span className="font-mono">
-                {appointment.payment?.razorpayPaymentId || "—"}
-              </span>
-            </p>
-
             <div className="flex items-center gap-4 mt-3">
-              <IndianRupee className="h-6 w-6 text-gray-400" />
-              <span className="text-2xl font-semibold text-gray-900">
-                ₹{(appointment.payment?.amount || 0) / 100}
-              </span>
+              {appointment.city !== "DEHRADUN" && (
+                <>
+                  <IndianRupee className="h-6 w-6 text-gray-400" />
+                  <span className="text-2xl font-semibold text-gray-900">
+                    ₹{(appointment.payment?.amount || 0) / 100}
+                  </span>
+                </>
+              )}
 
               <span
                 className={`rounded-full px-3 py-1 text-xs font-semibold ${
@@ -1176,97 +1173,89 @@ function PrescriptionModal({
 
         {/* ================= MEDICINES ================= */}
 
-<div>
-  <div className="flex items-center justify-between mb-3">
-    <p className="font-medium">Medicines</p>
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <p className="font-medium">Medicines</p>
 
-    <Button variant="outline" onClick={addMedicine}>
-      Add Medicine
-    </Button>
-  </div>
+            <Button variant="outline" onClick={addMedicine}>
+              Add Medicine
+            </Button>
+          </div>
 
-  <div className="space-y-4">
+          <div className="space-y-4">
+            {medicines.map((m, i) => (
+              <div
+                key={i}
+                className="border rounded-xl p-4 space-y-3 bg-gray-50"
+              >
+                {/* Medicine name full width */}
 
-    {medicines.map((m, i) => (
-      <div
-        key={i}
-        className="border rounded-xl p-4 space-y-3 bg-gray-50"
-      >
+                <Input
+                  placeholder="Medicine name"
+                  value={m.name}
+                  onChange={(e) => updateMedicine(i, "name", e.target.value)}
+                />
 
-        {/* Medicine name full width */}
+                {/* dosage / timing / frequency / duration */}
 
-        <Input
-          placeholder="Medicine name"
-          value={m.name}
-          onChange={(e) =>
-            updateMedicine(i, "name", e.target.value)
-          }
-        />
+                <div className="grid grid-cols-4 gap-2">
+                  <Input
+                    placeholder="Dosage (1-0-1)"
+                    value={m.dosage}
+                    onChange={(e) =>
+                      updateMedicine(i, "dosage", e.target.value)
+                    }
+                  />
 
-        {/* dosage / timing / frequency / duration */}
+                  <select
+                    value={m.timing}
+                    onChange={(e) =>
+                      updateMedicine(i, "timing", e.target.value)
+                    }
+                    className="border rounded-lg p-2"
+                  >
+                    <option value="">Timing</option>
+                    <option value="After Food">After Food</option>
+                    <option value="Before Food">Before Food</option>
+                    <option value="Empty Stomach">Empty Stomach</option>
+                  </select>
 
-        <div className="grid grid-cols-4 gap-2">
+                  <select
+                    value={m.frequency}
+                    onChange={(e) =>
+                      updateMedicine(i, "frequency", e.target.value)
+                    }
+                    className="border rounded-lg p-2"
+                  >
+                    <option value="Daily">Daily</option>
+                    <option value="SOS">SOS</option>
+                    <option value="Alternate Day">Alternate Day</option>
+                  </select>
 
-          <Input
-            placeholder="Dosage (1-0-1)"
-            value={m.dosage}
-            onChange={(e) =>
-              updateMedicine(i, "dosage", e.target.value)
-            }
-          />
+                  <Input
+                    placeholder="Duration (5 days)"
+                    value={m.duration}
+                    onChange={(e) =>
+                      updateMedicine(i, "duration", e.target.value)
+                    }
+                  />
+                </div>
 
-          <select
-            value={m.timing}
-            onChange={(e) =>
-              updateMedicine(i, "timing", e.target.value)
-            }
-            className="border rounded-lg p-2"
-          >
-            <option value="">Timing</option>
-            <option value="After Food">After Food</option>
-            <option value="Before Food">Before Food</option>
-            <option value="Empty Stomach">Empty Stomach</option>
-          </select>
+                {/* remove button */}
 
-          <select
-            value={m.frequency}
-            onChange={(e) =>
-              updateMedicine(i, "frequency", e.target.value)
-            }
-            className="border rounded-lg p-2"
-          >
-            <option value="Daily">Daily</option>
-            <option value="SOS">SOS</option>
-            <option value="Alternate Day">Alternate Day</option>
-          </select>
-
-          <Input
-            placeholder="Duration (5 days)"
-            value={m.duration}
-            onChange={(e) =>
-              updateMedicine(i, "duration", e.target.value)
-            }
-          />
-
+                <div className="flex justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => removeMedicine(i)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-
-        {/* remove button */}
-
-        <div className="flex justify-end">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => removeMedicine(i)}
-          >
-            Remove
-          </Button>
-        </div>
-
-      </div>
-    ))}
-
-  </div>
-</div>
         {/* ================= ADVICE ================= */}
 
         <div>
